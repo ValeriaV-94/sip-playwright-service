@@ -1,18 +1,13 @@
 {
   "name": "sip-service",
   "version": "1.0.0",
-  "description": "",
   "main": "index.js",
   "scripts": {
-  "start": "node index.js",
-  "postinstall": "npx playwright install chromium"
-},
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+    "start": "node index.js",
+    "postinstall": "npx playwright install chromium"
+  },
   "dependencies": {
-    "express": "^5.2.1",
-    "playwright": "^1.60.0"
+    "express": "^4.18.2",
+    "playwright": "^1.40.0"
   }
 }
