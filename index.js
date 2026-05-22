@@ -1,3 +1,5 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 const express = require('express');
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -9,7 +11,7 @@ app.get('/scrape', async (req, res) => {
   const TARGET_DATE = req.query.date;
 
   if (!TARGET_DATE) {
-    return res.status(400).send("Falta ?date=YYYY-MM-DD");
+    return res.status(400).send("Falta parámetro ?date=YYYY-MM-DD");
   }
 
   try {
@@ -18,84 +20,106 @@ app.get('/scrape', async (req, res) => {
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
 
-    const context = await browser.newContext();
+    const context = await browser.newContext({
+      ignoreHTTPSErrors: true
+    });
+
     const page = await context.newPage();
 
-    console.log("🌐 Entrando...");
+    console.log("Entrando al portal...");
+
     await page.goto('https://sip.gdu.com.uy/SIP/', {
       waitUntil: 'networkidle'
     });
 
-    await page.waitForTimeout(15000);
+    // ⏳ esperar a que Shiny renderice TODO
+    await page.waitForTimeout(8000);
 
-    console.log("📅 Seteando fechas REAL...");
+    console.log("Buscando contenedor de fechas...");
 
+    await page.waitForSelector('#Fechasstock', { timeout: 15000 });
+
+    console.log("Seteando fechas via JS...");
+
+    // ⚠️ FORZAMOS valores dentro del contenedor Shiny
     await page.evaluate((date) => {
-      if (!window.Shiny) throw new Error("Shiny no cargó");
+      const container = document.querySelector('#Fechasstock');
+      if (!container) throw new Error("No existe #Fechasstock");
 
-      // SETEAR RANGO DE FECHAS CORRECTAMENTE
-      Shiny.setInputValue('Fechasstock', [date, date], { priority: 'event' });
+      const inputs = container.querySelectorAll('input');
+
+      if (inputs.length < 2) {
+        throw new Error("No hay suficientes inputs de fecha");
+      }
+
+      inputs[0].value = date;
+      inputs[1].value = date;
+
+      inputs[0].dispatchEvent(new Event('change', { bubbles: true }));
+      inputs[1].dispatchEvent(new Event('change', { bubbles: true }));
     }, TARGET_DATE);
 
-    console.log("⏳ Esperando que Shiny procese...");
-    await page.waitForTimeout(12000);
+    console.log("Esperando que Shiny procese cambios...");
+    await page.waitForTimeout(5000);
 
-    console.log("🔍 Buscando link de descarga REAL...");
+    console.log("Obteniendo link de descarga...");
 
-    // 🔥 ESTE ES EL FIX CLAVE
+    await page.waitForSelector('#DescargarStock', { timeout: 15000 });
+
     const downloadUrl = await page.evaluate(() => {
       const link = document.querySelector('#DescargarStock');
-      if (!link) throw new Error("No existe botón");
+      if (!link) throw new Error("No existe botón descargar");
 
-      return link.href; // 👈 ACA ESTA LA CLAVE
+      return link.href;
     });
 
-    console.log("📥 URL de descarga:", downloadUrl);
+    console.log("URL descarga:", downloadUrl);
 
-    if (!downloadUrl.includes("download")) {
-      throw new Error("Shiny no generó archivo todavía");
-    }
+    console.log("Obteniendo cookies...");
 
-    const filePath = `/tmp/stock_${TARGET_DATE}.csv`;
-
-    console.log("⬇️ Descargando archivo MANUALMENTE...");
-
-    // 🔥 Descargar manual con cookies de sesión
     const cookies = await context.cookies();
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
 
+    const filePath = `/tmp/stock_${TARGET_DATE}.csv`;
+
+    console.log("Descargando archivo REAL...");
+
     const file = fs.createWriteStream(filePath);
 
-    await new Promise((resolve, reject) => {
-      const request = https.get(downloadUrl, {
-        headers: {
-          Cookie: cookieHeader
-        }
-      }, response => {
-        if (response.statusCode !== 200) {
-          reject(new Error("Respuesta no válida"));
-        }
-        response.pipe(file);
-        file.on('finish', () => {
-          file.close(resolve);
-        });
+    https.get(downloadUrl, {
+      headers: {
+        Cookie: cookieHeader
+      },
+      rejectUnauthorized: false
+    }, response => {
+
+      if (response.statusCode !== 200) {
+        console.log("STATUS ERROR:", response.statusCode);
+        return res.status(500).send("Error descargando archivo");
+      }
+
+      response.pipe(file);
+
+      file.on('finish', () => {
+        file.close();
+        console.log("Archivo descargado correctamente");
+
+        browser.close();
+        return res.download(filePath);
       });
 
-      request.on('error', reject);
+    }).on('error', err => {
+      console.error("ERROR HTTPS:", err);
+      browser.close();
+      return res.status(500).send(err.toString());
     });
 
-    console.log("✅ Archivo descargado correctamente");
-
-    await browser.close();
-
-    return res.download(filePath);
-
   } catch (error) {
-    console.error("❌ ERROR:", error);
+    console.error("ERROR GENERAL:", error);
     return res.status(500).send(error.toString());
   }
 });
 
 app.listen(3000, () => {
-  console.log("🚀 Server listo");
+  console.log("Servidor corriendo en puerto 3000");
 });
