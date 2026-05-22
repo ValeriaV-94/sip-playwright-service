@@ -1,5 +1,6 @@
 const express = require('express');
 const { chromium } = require('playwright');
+
 const fs = require('fs');
 
 const app = express();
@@ -17,7 +18,10 @@ app.get('/scrape', async (req, res) => {
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
 
-    const context = await browser.newContext();
+    const context = await browser.newContext({
+      acceptDownloads: true
+    });
+
     const page = await context.newPage();
 
     console.log("🌐 Entrando al portal...");
@@ -26,50 +30,39 @@ app.get('/scrape', async (req, res) => {
       waitUntil: 'networkidle'
     });
 
-    // ⏳ Esperar a que cargue Shiny
+    // ⏳ Esperar carga completa de Shiny
     await page.waitForTimeout(15000);
 
-    console.log("📅 Seteando fechas en Shiny...");
+    console.log("📅 Seteando fechas...");
 
     await page.evaluate((date) => {
       if (!window.Shiny) {
         throw new Error("Shiny no está disponible");
       }
 
-      // 🔥 CLAVE: dateRangeInput → array
+      // 🔥 IMPORTANTE: dateRangeInput → array
       Shiny.setInputValue('Fechasstock', [date, date], { priority: "event" });
 
     }, TARGET_DATE);
 
-    console.log("⏳ Esperando que Shiny procese...");
+    console.log("⏳ Esperando procesamiento...");
 
     await page.waitForTimeout(8000);
 
-    console.log("🔍 Buscando botón de descarga...");
+    console.log("🔍 Esperando botón descargar...");
 
     await page.waitForSelector('#DescargarStock', { timeout: 20000 });
 
-    const downloadUrl = await page.$eval('#DescargarStock', el => el.href);
+    console.log("⬇️ Ejecutando descarga real...");
 
-    console.log("🔗 URL de descarga:", downloadUrl);
-
-    if (!downloadUrl || !downloadUrl.includes('download')) {
-      throw new Error("El link de descarga no es válido");
-    }
-
-    console.log("⬇️ Descargando archivo...");
-
-    const response = await page.goto(downloadUrl);
-
-    if (!response || response.status() !== 200) {
-      throw new Error("Error al descargar archivo");
-    }
-
-    const buffer = await response.body();
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.click('#DescargarStock')
+    ]);
 
     const filePath = `/tmp/stock_${TARGET_DATE}.csv`;
 
-    fs.writeFileSync(filePath, buffer);
+    await download.saveAs(filePath);
 
     console.log("✅ Archivo descargado correctamente");
 
