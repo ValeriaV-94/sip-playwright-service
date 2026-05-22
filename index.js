@@ -49,22 +49,20 @@ app.get('/scrape', async (req, res) => {
     }, TARGET_DATE);
 
     console.log("Buscando botón descargar...");
+    const botones = await page.evaluate(() => {
+  return Array.from(document.querySelectorAll('button')).map(b => ({
+    text: b.innerText,
+    html: b.outerHTML
+  }));
+});
+
+console.log("BOTONES EN LA PAGINA:", botones);
 
     await page.waitForTimeout(5000);
 
-    const [download] = await Promise.all([
-      page.waitForEvent('download'),
-      page.evaluate(() => {
-        const btn = Array.from(document.querySelectorAll('button'))
-          .find(b => b.innerText.toLowerCase().includes('descargar'));
+    await page.screenshot({ path: '/tmp/debug.png' });
 
-        if (!btn) {
-          throw new Error("No se encontró botón descargar");
-        }
-
-        btn.click();
-      })
-    ]);
+return res.send("Revisar logs y screenshot");
 
     const filePath = `/tmp/stock_${TARGET_DATE}.csv`;
 
