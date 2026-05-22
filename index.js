@@ -26,69 +26,47 @@ app.get('/scrape', async (req, res) => {
       waitUntil: 'networkidle'
     });
 
-    // 🔥 Esperar Shiny (MUY IMPORTANTE)
+    // 🔥 Esperar que Shiny cargue
     await page.waitForTimeout(15000);
 
-    console.log("Buscando inputs de fecha reales...");
+    console.log("Inyectando fecha vía Shiny...");
 
-    // 🔥 Buscar TODOS los inputs visibles
-    const inputs = await page.locator('input').all();
-
-    if (inputs.length < 2) {
-      throw new Error("No hay suficientes inputs en la página");
-    }
-
-    // 🔥 Filtrar los que tienen formato fecha
-    const dateInputs = [];
-
-    for (const input of inputs) {
-      const value = await input.inputValue().catch(() => null);
-      const placeholder = await input.getAttribute('placeholder');
-
-      if (
-        (value && value.includes('-')) ||
-        (placeholder && placeholder.includes('YYYY'))
-      ) {
-        dateInputs.push(input);
+    await page.evaluate((date) => {
+      if (!window.Shiny) {
+        throw new Error("Shiny no está disponible");
       }
-    }
 
-    if (dateInputs.length < 2) {
-      throw new Error("No se encontraron inputs de fecha detectables");
-    }
+      // 🔥 nombres reales (IMPORTANTE)
+      Shiny.setInputValue('Fechasstock-date1', date);
+      Shiny.setInputValue('Fechasstock-date2', date);
+    }, TARGET_DATE);
 
-    console.log("Seteando fechas...");
+    console.log("Esperando actualización...");
 
-    await dateInputs[0].fill(TARGET_DATE);
-    await dateInputs[1].fill(TARGET_DATE);
+    await page.waitForTimeout(8000);
 
-    // 🔥 Esperar que Shiny actualice
-    await page.waitForTimeout(6000);
-
-    console.log("Buscando link de descarga...");
+    console.log("Obteniendo link de descarga...");
 
     await page.waitForSelector('#DescargarStock', { timeout: 20000 });
 
-    await page.waitForFunction(() => {
-      const el = document.querySelector('#DescargarStock');
-      return el && el.href && el.href.includes('/download/');
-    });
-
     const downloadUrl = await page.$eval('#DescargarStock', el => el.href);
+
+    if (!downloadUrl || !downloadUrl.includes('/download/')) {
+      throw new Error("El link de descarga no se generó correctamente");
+    }
 
     console.log("URL:", downloadUrl);
 
     const response = await page.goto(downloadUrl);
-
     const buffer = await response.body();
 
     const filePath = `/tmp/stock_${TARGET_DATE}.csv`;
 
     fs.writeFileSync(filePath, buffer);
 
-    console.log("Archivo descargado correctamente");
-
     await browser.close();
+
+    console.log("Archivo descargado correctamente");
 
     return res.download(filePath);
 
