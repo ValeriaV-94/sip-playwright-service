@@ -11,87 +11,75 @@ app.get('/scrape', async (req, res) => {
     return res.status(400).send("Falta fecha");
   }
 
-  let browser;
-
   try {
-    console.log("Lanzando navegador...");
-
-    browser = await chromium.launch({
+    const browser = await chromium.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
 
-    const context = await browser.newContext({
-      acceptDownloads: true
-    });
-
+    const context = await browser.newContext();
     const page = await context.newPage();
 
     console.log("Entrando al portal...");
 
     await page.goto('https://sip.gdu.com.uy/SIP/', {
-      waitUntil: 'domcontentloaded'
+      waitUntil: 'networkidle'
     });
 
-    await page.waitForTimeout(8000);
+    // Espera fuerte (Shiny es lento)
+    await page.waitForTimeout(12000);
 
-    console.log("Seteando fecha...");
+    console.log("Seteando fechas...");
 
-    await page.evaluate((date) => {
-      const inputs = document.querySelectorAll('input');
+    const inputs = await page.$$('input[type="date"]');
 
-      inputs.forEach(input => {
-        try {
-          input.value = date;
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-        } catch (e) {}
-      });
-    }, TARGET_DATE);
+    if (inputs.length < 2) {
+      throw new Error("No se encontraron inputs de fecha");
+    }
 
-    console.log("Buscando botón descargar...");
-    const botones = await page.evaluate(() => {
-  return Array.from(document.querySelectorAll('button')).map(b => ({
-    text: b.innerText,
-    html: b.outerHTML
-  }));
-});
+    await inputs[0].fill(TARGET_DATE);
+    await inputs[1].fill(TARGET_DATE);
 
-console.log("BOTONES EN LA PAGINA:", botones);
+    // Esperar que Shiny procese
+    await page.waitForTimeout(6000);
 
-    await page.waitForTimeout(5000);
+    console.log("Esperando link de descarga...");
 
-    await page.screenshot({ path: '/tmp/debug.png' });
+    await page.waitForSelector('#DescargarStock', { timeout: 20000 });
 
-return res.send("Revisar logs y screenshot");
+    // 🔥 Esperar a que el href tenga contenido real
+    await page.waitForFunction(() => {
+      const el = document.querySelector('#DescargarStock');
+      return el && el.href && el.href.includes('/download/');
+    });
+
+    const downloadUrl = await page.$eval('#DescargarStock', el => el.href);
+
+    if (!downloadUrl) {
+      throw new Error("No se pudo obtener URL de descarga");
+    }
+
+    console.log("URL de descarga:", downloadUrl);
+
+    // 🔥 Descargar directo SIN click
+    const response = await page.goto(downloadUrl);
+
+    const buffer = await response.body();
 
     const filePath = `/tmp/stock_${TARGET_DATE}.csv`;
 
-    console.log("Guardando archivo...");
+    fs.writeFileSync(filePath, buffer);
 
-    await download.saveAs(filePath);
+    console.log("Archivo descargado correctamente");
 
-    console.log("Enviando archivo...");
+    await browser.close();
 
-    res.download(filePath, () => {
-      fs.unlinkSync(filePath);
-    });
+    return res.download(filePath);
 
   } catch (error) {
-    console.error("ERROR REAL:", error);
-
-    return res.status(500).send(`
-      ERROR:
-      ${error.message}
-    `);
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
+    console.error("ERROR:", error);
+    return res.status(500).send(error.toString());
   }
-});
-
-app.get('/', (req, res) => {
-  res.send("OK");
 });
 
 app.listen(3000, () => {
