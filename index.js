@@ -26,36 +26,36 @@ app.get('/scrape', async (req, res) => {
       waitUntil: 'networkidle'
     });
 
-    // 🔥 Esperar que Shiny cargue
     await page.waitForTimeout(15000);
 
-    console.log("Inyectando fecha vía Shiny...");
+    console.log("Seteando fechas con Shiny...");
 
     await page.evaluate((date) => {
       if (!window.Shiny) {
-        throw new Error("Shiny no está disponible");
+        throw new Error("Shiny no cargó");
       }
 
-      // 🔥 nombres reales (IMPORTANTE)
-      Shiny.setInputValue('Fechasstock-date1', date);
-      Shiny.setInputValue('Fechasstock-date2', date);
+      Shiny.setInputValue('Fechasstock-date1', date, { priority: "event" });
+      Shiny.setInputValue('Fechasstock-date2', date, { priority: "event" });
     }, TARGET_DATE);
 
-    console.log("Esperando actualización...");
+    console.log("Esperando actualización del botón...");
 
-    await page.waitForTimeout(8000);
-
-    console.log("Obteniendo link de descarga...");
-
-    await page.waitForSelector('#DescargarStock', { timeout: 20000 });
+    // 🔥 CLAVE: esperar que el href cambie
+    await page.waitForFunction(() => {
+      const btn = document.querySelector('#DescargarStock');
+      return btn && btn.href && btn.href.includes('download') && btn.href.includes('session');
+    }, { timeout: 20000 });
 
     const downloadUrl = await page.$eval('#DescargarStock', el => el.href);
 
-    if (!downloadUrl || !downloadUrl.includes('/download/')) {
-      throw new Error("El link de descarga no se generó correctamente");
+    console.log("Nueva URL:", downloadUrl);
+
+    if (!downloadUrl.includes('download')) {
+      throw new Error("El link no es válido");
     }
 
-    console.log("URL:", downloadUrl);
+    console.log("Descargando archivo...");
 
     const response = await page.goto(downloadUrl);
     const buffer = await response.body();
@@ -66,7 +66,7 @@ app.get('/scrape', async (req, res) => {
 
     await browser.close();
 
-    console.log("Archivo descargado correctamente");
+    console.log("Archivo OK");
 
     return res.download(filePath);
 
