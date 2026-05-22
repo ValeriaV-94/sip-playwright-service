@@ -30,22 +30,48 @@ app.get('/scrape', async (req, res) => {
 
     await page.waitForTimeout(6000);
 
-    console.log("Seteando fechas...");
+console.log("Esperando carga de filtros...");
 
-    const inputs = await page.$$('input[type="date"]');
+// Esperar que cargue la página dinámica
+await page.waitForSelector('input', { timeout: 15000 });
 
-    if (inputs.length < 2) {
-      throw new Error("No se encontraron inputs de fecha");
-    }
+console.log("Seteando fecha vía JavaScript...");
 
-    await inputs[0].fill(TARGET_DATE);
-    await inputs[1].fill(TARGET_DATE);
+// Forzar fecha en TODOS los inputs
+await page.evaluate((date) => {
+  const inputs = document.querySelectorAll('input');
+
+  inputs.forEach(input => {
+    try {
+      input.value = date;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (e) {}
+  });
+}, TARGET_DATE);
+
+console.log("Fecha seteada");
 
     console.log("Buscando botón descargar...");
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('text=Descargar').click()
+      console.log("Buscando botón descargar...");
+
+await page.waitForSelector('button', { timeout: 15000 });
+
+const [download] = await Promise.all([
+  page.waitForEvent('download'),
+  page.evaluate(() => {
+    const btn = Array.from(document.querySelectorAll('button'))
+      .find(b => b.innerText.includes('Descargar'));
+
+    if (btn) {
+      btn.click();
+    } else {
+      throw new Error("Botón Descargar no encontrado");
+    }
+  })
+]);
     ]);
 
     const filePath = `/tmp/stock_${TARGET_DATE}.csv`;
