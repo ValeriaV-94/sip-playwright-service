@@ -28,26 +28,39 @@ app.get('/scrape', async (req, res) => {
       waitUntil: 'networkidle'
     });
 
-    // ⏳ esperar Shiny
     await page.waitForTimeout(15000);
 
-    console.log("📅 Seteando fechas correctamente (Shiny)...");
+    console.log("📅 Seteando fechas...");
 
     await page.evaluate((date) => {
-      if (!window.Shiny || !Shiny.setInputValue) {
-        throw new Error("Shiny no disponible");
+      if (!window.Shiny) {
+        throw new Error("Shiny no cargó");
       }
 
-      // 🔥 ESTE ES EL FIX REAL
+      // 🔥 set correcto
       Shiny.setInputValue('Fechasstock', [date, date], { priority: 'event' });
+
+      // 🔥 FORZAR evento extra (CLAVE)
+      document.dispatchEvent(new Event('change'));
 
     }, TARGET_DATE);
 
-    console.log("⏳ Esperando actualización interna...");
+    console.log("⏳ Esperando procesamiento...");
 
     await page.waitForTimeout(10000);
 
-    console.log("🔍 Esperando botón descarga activo...");
+    console.log("🔁 Forzando refresh interno...");
+
+    // 🔥 ESTE ES EL FIX FINAL
+    await page.evaluate(() => {
+      if (window.Shiny) {
+        Shiny.onInputChange('refresh', Math.random());
+      }
+    });
+
+    await page.waitForTimeout(8000);
+
+    console.log("🔍 Esperando botón...");
 
     await page.waitForSelector('#DescargarStock', { timeout: 20000 });
 
@@ -62,7 +75,7 @@ app.get('/scrape', async (req, res) => {
 
     await download.saveAs(filePath);
 
-    console.log("✅ DESCARGA OK");
+    console.log("✅ DESCARGA COMPLETA");
 
     await browser.close();
 
