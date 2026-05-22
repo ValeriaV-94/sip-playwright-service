@@ -26,28 +26,49 @@ app.get('/scrape', async (req, res) => {
       waitUntil: 'networkidle'
     });
 
-    // Espera fuerte (Shiny es lento)
-    await page.waitForTimeout(12000);
+    // 🔥 Esperar Shiny (MUY IMPORTANTE)
+    await page.waitForTimeout(15000);
+
+    console.log("Buscando inputs de fecha reales...");
+
+    // 🔥 Buscar TODOS los inputs visibles
+    const inputs = await page.locator('input').all();
+
+    if (inputs.length < 2) {
+      throw new Error("No hay suficientes inputs en la página");
+    }
+
+    // 🔥 Filtrar los que tienen formato fecha
+    const dateInputs = [];
+
+    for (const input of inputs) {
+      const value = await input.inputValue().catch(() => null);
+      const placeholder = await input.getAttribute('placeholder');
+
+      if (
+        (value && value.includes('-')) ||
+        (placeholder && placeholder.includes('YYYY'))
+      ) {
+        dateInputs.push(input);
+      }
+    }
+
+    if (dateInputs.length < 2) {
+      throw new Error("No se encontraron inputs de fecha detectables");
+    }
 
     console.log("Seteando fechas...");
 
-    const inputs = await page.$$('input[type="date"]');
+    await dateInputs[0].fill(TARGET_DATE);
+    await dateInputs[1].fill(TARGET_DATE);
 
-    if (inputs.length < 2) {
-      throw new Error("No se encontraron inputs de fecha");
-    }
-
-    await inputs[0].fill(TARGET_DATE);
-    await inputs[1].fill(TARGET_DATE);
-
-    // Esperar que Shiny procese
+    // 🔥 Esperar que Shiny actualice
     await page.waitForTimeout(6000);
 
-    console.log("Esperando link de descarga...");
+    console.log("Buscando link de descarga...");
 
     await page.waitForSelector('#DescargarStock', { timeout: 20000 });
 
-    // 🔥 Esperar a que el href tenga contenido real
     await page.waitForFunction(() => {
       const el = document.querySelector('#DescargarStock');
       return el && el.href && el.href.includes('/download/');
@@ -55,13 +76,8 @@ app.get('/scrape', async (req, res) => {
 
     const downloadUrl = await page.$eval('#DescargarStock', el => el.href);
 
-    if (!downloadUrl) {
-      throw new Error("No se pudo obtener URL de descarga");
-    }
+    console.log("URL:", downloadUrl);
 
-    console.log("URL de descarga:", downloadUrl);
-
-    // 🔥 Descargar directo SIN click
     const response = await page.goto(downloadUrl);
 
     const buffer = await response.body();
