@@ -1,6 +1,0 @@
-services:
-  - type: web
-    name: sip-playwright-service
-    env: node
-    buildCommand: npm install && npx playwright install --with-deps
-    startCommand: npm start
