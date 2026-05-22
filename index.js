@@ -1,6 +1,5 @@
 const express = require('express');
 const { chromium } = require('playwright');
-const fs = require('fs');
 
 const app = express();
 
@@ -29,38 +28,30 @@ app.get('/scrape', async (req, res) => {
       waitUntil: 'networkidle'
     });
 
+    // ⏳ esperar Shiny
     await page.waitForTimeout(15000);
 
-    console.log("📅 Buscando inputs reales...");
+    console.log("📅 Seteando fechas correctamente (Shiny)...");
 
-    const inputs = await page.locator('input');
+    await page.evaluate((date) => {
+      if (!window.Shiny || !Shiny.setInputValue) {
+        throw new Error("Shiny no disponible");
+      }
 
-    const count = await inputs.count();
+      // 🔥 ESTE ES EL FIX REAL
+      Shiny.setInputValue('Fechasstock', [date, date], { priority: 'event' });
 
-    console.log("Inputs encontrados:", count);
+    }, TARGET_DATE);
 
-    if (count < 2) {
-      throw new Error("No se encontraron inputs");
-    }
-
-    // 🔥 usar los últimos 2 inputs (los de fecha)
-    const inputStart = inputs.nth(count - 2);
-    const inputEnd = inputs.nth(count - 1);
-
-    await inputStart.fill(TARGET_DATE);
-    await inputEnd.fill(TARGET_DATE);
-
-    // 🔥 disparar eventos reales
-    await inputStart.dispatchEvent('change');
-    await inputEnd.dispatchEvent('change');
-
-    console.log("⏳ Esperando que Shiny procese...");
+    console.log("⏳ Esperando actualización interna...");
 
     await page.waitForTimeout(10000);
 
-    console.log("⬇️ Intentando descarga...");
+    console.log("🔍 Esperando botón descarga activo...");
 
-    await page.waitForSelector('#DescargarStock');
+    await page.waitForSelector('#DescargarStock', { timeout: 20000 });
+
+    console.log("⬇️ Ejecutando descarga REAL...");
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
@@ -71,7 +62,7 @@ app.get('/scrape', async (req, res) => {
 
     await download.saveAs(filePath);
 
-    console.log("✅ Descarga OK");
+    console.log("✅ DESCARGA OK");
 
     await browser.close();
 
