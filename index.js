@@ -1,6 +1,5 @@
 const express = require('express');
 const { chromium } = require('playwright');
-
 const fs = require('fs');
 
 const app = express();
@@ -24,36 +23,44 @@ app.get('/scrape', async (req, res) => {
 
     const page = await context.newPage();
 
-    console.log("🌐 Entrando al portal...");
+    console.log("🌐 Entrando...");
 
     await page.goto('https://sip.gdu.com.uy/SIP/', {
       waitUntil: 'networkidle'
     });
 
-    // ⏳ Esperar carga completa de Shiny
     await page.waitForTimeout(15000);
 
-    console.log("📅 Seteando fechas...");
+    console.log("📅 Buscando inputs reales...");
 
-    await page.evaluate((date) => {
-      if (!window.Shiny) {
-        throw new Error("Shiny no está disponible");
-      }
+    const inputs = await page.locator('input');
 
-      // 🔥 IMPORTANTE: dateRangeInput → array
-      Shiny.setInputValue('Fechasstock', [date, date], { priority: "event" });
+    const count = await inputs.count();
 
-    }, TARGET_DATE);
+    console.log("Inputs encontrados:", count);
 
-    console.log("⏳ Esperando procesamiento...");
+    if (count < 2) {
+      throw new Error("No se encontraron inputs");
+    }
 
-    await page.waitForTimeout(8000);
+    // 🔥 usar los últimos 2 inputs (los de fecha)
+    const inputStart = inputs.nth(count - 2);
+    const inputEnd = inputs.nth(count - 1);
 
-    console.log("🔍 Esperando botón descargar...");
+    await inputStart.fill(TARGET_DATE);
+    await inputEnd.fill(TARGET_DATE);
 
-    await page.waitForSelector('#DescargarStock', { timeout: 20000 });
+    // 🔥 disparar eventos reales
+    await inputStart.dispatchEvent('change');
+    await inputEnd.dispatchEvent('change');
 
-    console.log("⬇️ Ejecutando descarga real...");
+    console.log("⏳ Esperando que Shiny procese...");
+
+    await page.waitForTimeout(10000);
+
+    console.log("⬇️ Intentando descarga...");
+
+    await page.waitForSelector('#DescargarStock');
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
@@ -64,7 +71,7 @@ app.get('/scrape', async (req, res) => {
 
     await download.saveAs(filePath);
 
-    console.log("✅ Archivo descargado correctamente");
+    console.log("✅ Descarga OK");
 
     await browser.close();
 
@@ -77,5 +84,5 @@ app.get('/scrape', async (req, res) => {
 });
 
 app.listen(3000, () => {
-  console.log("🚀 Servidor corriendo en puerto 3000");
+  console.log("🚀 Server listo");
 });
